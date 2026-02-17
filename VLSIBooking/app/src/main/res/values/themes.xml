@@ -1,0 +1,8 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <style name="Theme.VLSI_Booking" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- Customize if you want -->
+        <item name="android:statusBarColor" tools:targetApi="l">?attr/colorSurface</item>
+    </style>
+
+</resources>
