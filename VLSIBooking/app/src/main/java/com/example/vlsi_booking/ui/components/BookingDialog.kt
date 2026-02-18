@@ -12,10 +12,11 @@ fun BookingDialog(
     desk: DeskStatus,
     amAvailable: Boolean,
     pmAvailable: Boolean,
+    initialName: String = "",
     onDismiss: () -> Unit,
     onConfirm: (name: String, am: Boolean, pm: Boolean) -> Unit
 ) {
-    var name by remember { mutableStateOf("") }
+    var name by remember(initialName) { mutableStateOf(initialName) }
 
     // Preselect only available slots
     var am by remember { mutableStateOf(amAvailable) }

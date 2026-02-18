@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- Debug-only override: allow emulator host for local backend via http://10.0.2.2 -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+
+    <!-- Keep the production domain locked down as in main -->
+    <domain-config cleartextTrafficPermitted="false">
+        <domain includeSubdomains="true">pc-lse-1860.polito.it</domain>
+
+        <trust-anchors>
+            <certificates src="@raw/lab_ca" />
+        </trust-anchors>
+    </domain-config>
+</network-security-config>

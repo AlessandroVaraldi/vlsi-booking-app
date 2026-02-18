@@ -9,16 +9,17 @@ Features added vs your current version:
 - Automatic deletion of ALL bookings for a desk when it stops being a "tesisti" desk
 """
 
-from datetime import date
+from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import Optional, List, Dict, Tuple
 from contextlib import asynccontextmanager
 import os
 import secrets
+import hashlib
 
 from fastapi import FastAPI, HTTPException, Query, Depends, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi.security import HTTPBasic, HTTPBasicCredentials, HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sqlmodel import SQLModel, Field as SQLField, Session, create_engine, select, UniqueConstraint
 
@@ -36,7 +37,31 @@ engine = create_engine(DB_URL, echo=False)
 ADMIN_USER = os.getenv("LAB_ADMIN_USER", "admin")
 ADMIN_PASS = os.getenv("LAB_ADMIN_PASS", "change-me")
 
+# Simple user auth credentials for the mobile app.
+# Format: "alice:pass,bob:pass2" (avoid using this in production).
+LAB_USERS = os.getenv("LAB_USERS", "user:password")
+
 security = HTTPBasic()
+bearer = HTTPBearer(auto_error=False)
+
+
+def parse_users(spec: str) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    for part in (spec or "").split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if ":" not in part:
+            continue
+        u, p = part.split(":", 1)
+        u = u.strip()
+        p = p.strip()
+        if u:
+            out[u] = p
+    return out
+
+
+APP_USERS = parse_users(LAB_USERS)
 
 
 def require_admin(credentials: HTTPBasicCredentials = Depends(security)) -> None:
@@ -106,6 +131,20 @@ class StaffCoverage(SQLModel, table=True):
     note: str = SQLField(default="", max_length=200)
 
 
+class AuthToken(SQLModel, table=True):
+    token: str = SQLField(primary_key=True)
+    username: str = SQLField(index=True, max_length=80)
+    created_at: datetime = SQLField(index=True)
+    expires_at: datetime = SQLField(index=True)
+
+
+class User(SQLModel, table=True):
+    username: str = SQLField(primary_key=True, max_length=80)
+    password_salt_hex: str = SQLField(max_length=64)
+    password_hash_hex: str = SQLField(max_length=128)
+    created_at: datetime = SQLField(index=True)
+
+
 # ----------------------------
 # API Schemas
 # ----------------------------
@@ -172,6 +211,17 @@ class CoverageOut(BaseModel):
     note: str
 
 
+class LoginRequest(BaseModel):
+    username: str = Field(min_length=1, max_length=80)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class LoginResponse(BaseModel):
+    token: str
+    username: str
+    expires_at: datetime
+
+
 # ----------------------------
 # App lifecycle
 # ----------------------------
@@ -222,6 +272,124 @@ def normalize_name(name: str, field_name: str = "name") -> str:
     if not n:
         raise HTTPException(status_code=400, detail=f"{field_name} cannot be empty.")
     return n
+
+
+PWD_KDF_ITERATIONS = 200_000
+
+
+def _hash_password(password: str, salt: bytes) -> bytes:
+    return hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PWD_KDF_ITERATIONS)
+
+
+def make_password_record(password: str) -> tuple[str, str]:
+    if len(password) < 4:
+        raise HTTPException(status_code=400, detail="Password too short")
+    salt = secrets.token_bytes(16)
+    digest = _hash_password(password, salt)
+    return salt.hex(), digest.hex()
+
+
+def verify_password(password: str, salt_hex: str, hash_hex: str) -> bool:
+    try:
+        salt = bytes.fromhex(salt_hex)
+        expected = bytes.fromhex(hash_hex)
+    except Exception:
+        return False
+    got = _hash_password(password, salt)
+    return secrets.compare_digest(got, expected)
+
+
+def require_user(credentials: HTTPAuthorizationCredentials = Depends(bearer)) -> str:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+
+    token = credentials.credentials
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing bearer token")
+
+    with Session(engine) as session:
+        row = session.get(AuthToken, token)
+        if not row:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        if row.expires_at < datetime.utcnow():
+            session.delete(row)
+            session.commit()
+            raise HTTPException(status_code=401, detail="Token expired")
+        return row.username
+
+
+@app.post("/auth/login", response_model=LoginResponse)
+def auth_login(req: LoginRequest):
+    username = normalize_name(req.username, "username")
+    password = req.password
+
+    # Prefer DB users (supports signup). Fallback to env LAB_USERS for backward compatibility.
+    ok = False
+    with Session(engine) as session:
+        user = session.get(User, username)
+        if user:
+            ok = verify_password(password, user.password_salt_hex, user.password_hash_hex)
+
+    if not ok:
+        expected = APP_USERS.get(username)
+        ok = expected is not None and secrets.compare_digest(password, expected)
+
+    if not ok:
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    now = datetime.utcnow()
+    expires_at = now + timedelta(days=180)
+    token = secrets.token_urlsafe(32)
+
+    with Session(engine) as session:
+        session.add(AuthToken(token=token, username=username, created_at=now, expires_at=expires_at))
+        session.commit()
+
+    return LoginResponse(token=token, username=username, expires_at=expires_at)
+
+
+@app.post("/auth/signup", response_model=LoginResponse)
+@app.post("/auth/register", response_model=LoginResponse)
+def auth_signup(req: LoginRequest):
+    username = normalize_name(req.username, "username")
+    password = req.password
+
+    salt_hex, hash_hex = make_password_record(password)
+    now = datetime.utcnow()
+
+    with Session(engine) as session:
+        existing = session.get(User, username)
+        if existing:
+            raise HTTPException(status_code=409, detail="User already exists")
+
+        session.add(User(username=username, password_salt_hex=salt_hex, password_hash_hex=hash_hex, created_at=now))
+
+        expires_at = now + timedelta(days=180)
+        token = secrets.token_urlsafe(32)
+        session.add(AuthToken(token=token, username=username, created_at=now, expires_at=expires_at))
+
+        session.commit()
+
+    return LoginResponse(token=token, username=username, expires_at=expires_at)
+
+
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+
+@app.post("/auth/logout")
+def auth_logout(username: str = Depends(require_user), credentials: HTTPAuthorizationCredentials = Depends(bearer)):
+    # Revoke current token.
+    token = credentials.credentials if credentials else None
+    if not token:
+        return {"ok": True}
+    with Session(engine) as session:
+        row = session.get(AuthToken, token)
+        if row:
+            session.delete(row)
+            session.commit()
+    return {"ok": True}
 
 
 def find_active_coverage(
@@ -324,7 +492,7 @@ def list_bookings(day: date = Query(...)):
 
 
 @app.post("/bookings", response_model=List[BookingOut])
-def create_booking(req: BookingCreate):
+def create_booking(req: BookingCreate, username: str = Depends(require_user)):
     booked_by = normalize_name(req.booked_by, "booked_by")
 
     if not req.am and not req.pm:
@@ -377,7 +545,7 @@ def create_booking(req: BookingCreate):
 
 
 @app.delete("/bookings/{booking_id}")
-def delete_booking(booking_id: int, req: CancelRequest):
+def delete_booking(booking_id: int, req: CancelRequest, username: str = Depends(require_user)):
     """
     Deletes a booking if booked_by matches (lightweight authorization without auth).
     """
