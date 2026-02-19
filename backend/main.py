@@ -238,6 +238,11 @@ class LoginResponse(BaseModel):
     expires_at: datetime
 
 
+class ChangePasswordRequest(BaseModel):
+    old_password: str = Field(min_length=1, max_length=200)
+    new_password: str = Field(min_length=1, max_length=200)
+
+
 # ----------------------------
 # App lifecycle
 # ----------------------------
@@ -406,6 +411,39 @@ def auth_logout(username: str = Depends(require_user), credentials: HTTPAuthoriz
             session.delete(row)
             session.commit()
     return {"ok": True}
+
+
+@app.post("/auth/change-password", response_model=LoginResponse)
+def auth_change_password(req: ChangePasswordRequest, username: str = Depends(require_user)):
+    old_password = req.old_password
+    new_password = req.new_password
+
+    # Only DB-backed users can change password.
+    with Session(engine) as session:
+        user = session.get(User, username)
+        if not user:
+            raise HTTPException(status_code=400, detail="Password change not available for this user")
+
+        if not verify_password(old_password, user.password_salt_hex, user.password_hash_hex):
+            raise HTTPException(status_code=401, detail="Invalid old password")
+
+        salt_hex, hash_hex = make_password_record(new_password)
+        user.password_salt_hex = salt_hex
+        user.password_hash_hex = hash_hex
+
+        # Revoke all existing tokens for this user and issue a new one.
+        tokens = session.exec(select(AuthToken).where(AuthToken.username == username)).all()
+        for t in tokens:
+            session.delete(t)
+
+        now = datetime.utcnow()
+        expires_at = now + timedelta(days=180)
+        token = secrets.token_urlsafe(32)
+        session.add(AuthToken(token=token, username=username, created_at=now, expires_at=expires_at))
+        session.add(user)
+        session.commit()
+
+    return LoginResponse(token=token, username=username, expires_at=expires_at)
 
 
 def find_active_coverage(

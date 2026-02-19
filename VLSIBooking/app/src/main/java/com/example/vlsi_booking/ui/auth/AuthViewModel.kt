@@ -11,6 +11,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.vlsi_booking.data.api.ApiClient
 import com.example.vlsi_booking.data.api.AuthTokenHolder
+import com.example.vlsi_booking.data.model.ChangePasswordRequest
 import com.example.vlsi_booking.data.model.LoginRequest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -119,7 +120,7 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
                 val msg = when (e.code()) {
                     409 -> "Utente già esistente"
                     400 -> "Password troppo corta"
-                    404 -> "Endpoint registrazione non trovato (404): controlla BASE_URL e riavvia il backend"
+                    404 -> "Endpoint registrazione non trovato (404): controlla l'indirizzo del backend e riavvia il backend"
                     else -> "Errore ${e.code()}"
                 }
                 getApplication<Application>().authDataStore.edit { prefs ->
@@ -144,6 +145,48 @@ class AuthViewModel(app: Application) : AndroidViewModel(app) {
             }
             AuthTokenHolder.token = null
             _state.value = _state.value.copy(isLoading = false, errorMessage = null)
+        }
+    }
+
+    fun changePassword(
+        oldPassword: String,
+        newPassword: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        val oldP = oldPassword
+        val newP = newPassword
+        if (oldP.isBlank() || newP.isBlank()) {
+            onError("Compila tutti i campi")
+            return
+        }
+
+        viewModelScope.launch {
+            try {
+                val resp = ApiClient.api.changePassword(
+                    ChangePasswordRequest(old_password = oldP, new_password = newP)
+                )
+
+                val token = resp.token
+                getApplication<Application>().authDataStore.edit { prefs ->
+                    prefs[Keys.USERNAME] = resp.username
+                    prefs[Keys.TOKEN] = token
+                    prefs[Keys.LOGGED_IN] = true
+                }
+                AuthTokenHolder.token = token
+
+                onSuccess()
+            } catch (e: HttpException) {
+                val msg = when (e.code()) {
+                    401 -> "Password attuale non corretta"
+                    400 -> "Impossibile cambiare password per questo utente"
+                    404 -> "Endpoint cambio password non trovato (404)"
+                    else -> "Errore ${e.code()}"
+                }
+                onError(msg)
+            } catch (e: Exception) {
+                onError(e.message ?: "Network error")
+            }
         }
     }
 }

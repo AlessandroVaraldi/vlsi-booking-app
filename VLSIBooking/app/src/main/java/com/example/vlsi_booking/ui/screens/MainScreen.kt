@@ -1,6 +1,7 @@
 package com.example.vlsi_booking.ui.screens
 
 import android.app.DatePickerDialog
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -19,6 +20,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -40,13 +42,21 @@ import kotlin.random.Random
 fun MainScreen(
     vm: MainViewModel,
     defaultBookingName: String = "",
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    onChangePassword: (
+        oldPassword: String,
+        newPassword: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) -> Unit
 ) {
     val state by vm.state.collectAsState()
 
     var bookingDesk by remember { mutableStateOf<DeskStatus?>(null) }
     var infoDesk by remember { mutableStateOf<DeskStatus?>(null) }
     var showMyBookings by remember { mutableStateOf(false) }
+
+    var showChangePassword by remember { mutableStateOf(false) }
 
     var breakoutStatus by remember { mutableStateOf(BreakoutStatus.INACTIVE) }
     val isBreakoutActive = breakoutStatus != BreakoutStatus.INACTIVE
@@ -200,12 +210,22 @@ fun MainScreen(
                     }
 
                     Button(
-                        onClick = onLogout,
-                        enabled = !isBreakoutActive,
+                        onClick = {
+                            if (isBreakoutActive) {
+                                breakoutStatus = BreakoutStatus.INACTIVE
+                                brokenDeskIds.clear()
+                            } else {
+                                breakoutDesksSnapshot = state.desks
+                                brokenDeskIds.clear()
+                                breakoutStatus = BreakoutStatus.PLAYING
+                                breakoutStartToken += 1
+                            }
+                        },
+                        enabled = true,
                         modifier = Modifier.weight(1f)
                     ) {
                         Text(
-                            text = "LOGOUT",
+                            text = if (isBreakoutActive) "BACK" else "BREAKOUT",
                             maxLines = 1,
                             softWrap = false,
                             overflow = TextOverflow.Clip
@@ -219,17 +239,13 @@ fun MainScreen(
                 ) {
                     Button(
                         onClick = {
-                            if (isBreakoutActive) return@Button
-                            breakoutDesksSnapshot = state.desks
-                            brokenDeskIds.clear()
-                            breakoutStatus = BreakoutStatus.PLAYING
-                            breakoutStartToken += 1
+                            showChangePassword = true
                         },
                         enabled = !isBreakoutActive,
                         modifier = Modifier.weight(1f)
                     ) {
                         Text(
-                            text = "BREAKOUT",
+                            text = "PASSWORD",
                             maxLines = 1,
                             softWrap = false,
                             overflow = TextOverflow.Clip
@@ -237,15 +253,12 @@ fun MainScreen(
                     }
 
                     Button(
-                        onClick = {
-                            breakoutStatus = BreakoutStatus.INACTIVE
-                            brokenDeskIds.clear()
-                        },
-                        enabled = isBreakoutActive,
+                        onClick = onLogout,
+                        enabled = !isBreakoutActive,
                         modifier = Modifier.weight(1f)
                     ) {
                         Text(
-                            text = "BACK",
+                            text = "LOGOUT",
                             maxLines = 1,
                             softWrap = false,
                             overflow = TextOverflow.Clip
@@ -305,6 +318,113 @@ fun MainScreen(
             }
         )
     }
+
+    if (!isBreakoutActive && showChangePassword) {
+        ChangePasswordDialog(
+            onDismiss = { showChangePassword = false },
+            onConfirm = { oldP, newP, onOk, onErr ->
+                onChangePassword(oldP, newP, onOk, onErr)
+            }
+        )
+    }
+}
+
+@Composable
+private fun ChangePasswordDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (
+        oldPassword: String,
+        newPassword: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+
+    var oldPassword by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var newPassword2 by remember { mutableStateOf("") }
+    var isSubmitting by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    val canSubmit = oldPassword.isNotBlank() && newPassword.isNotBlank() && newPassword2.isNotBlank() && !isSubmitting
+
+    AlertDialog(
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
+        title = { Text("Cambia password") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = oldPassword,
+                    onValueChange = { oldPassword = it; error = null },
+                    label = { Text("Password attuale") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    enabled = !isSubmitting,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = newPassword,
+                    onValueChange = { newPassword = it; error = null },
+                    label = { Text("Nuova password") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    enabled = !isSubmitting,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = newPassword2,
+                    onValueChange = { newPassword2 = it; error = null },
+                    label = { Text("Ripeti nuova password") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    enabled = !isSubmitting,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (isSubmitting) {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                }
+
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                enabled = canSubmit,
+                onClick = {
+                    if (newPassword != newPassword2) {
+                        error = "Le nuove password non coincidono"
+                        return@TextButton
+                    }
+                    if (newPassword.length < 4) {
+                        error = "Password troppo corta"
+                        return@TextButton
+                    }
+                    isSubmitting = true
+                    onConfirm(
+                        oldPassword,
+                        newPassword,
+                        {
+                            isSubmitting = false
+                            Toast.makeText(context, "Password cambiata", Toast.LENGTH_SHORT).show()
+                            onDismiss()
+                        },
+                        { msg ->
+                            isSubmitting = false
+                            error = msg
+                        }
+                    )
+                }
+            ) { Text("Salva") }
+        },
+        dismissButton = {
+            TextButton(
+                enabled = !isSubmitting,
+                onClick = onDismiss
+            ) { Text("Annulla") }
+        }
+    )
 }
 
 @Composable

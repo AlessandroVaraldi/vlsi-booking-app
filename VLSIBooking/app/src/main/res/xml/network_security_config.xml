@@ -1,10 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
     <domain-config cleartextTrafficPermitted="false">
-        <domain includeSubdomains="true">pc-lse-1860.polito.it</domain>
-
-        <trust-anchors>
-            <certificates src="@raw/lab_ca" />
-        </trust-anchors>
+        <domain includeSubdomains="false">vlsi-booking-app.onrender.com</domain>
     </domain-config>
 </network-security-config>

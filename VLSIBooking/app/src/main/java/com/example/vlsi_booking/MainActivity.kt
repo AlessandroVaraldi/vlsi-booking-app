@@ -25,7 +25,10 @@ class MainActivity : ComponentActivity() {
                     MainScreen(
                         vm = vm,
                         defaultBookingName = authState.username,
-                        onLogout = { authVm.logout() }
+                        onLogout = { authVm.logout() },
+                        onChangePassword = { oldP, newP, onOk, onErr ->
+                            authVm.changePassword(oldP, newP, onOk, onErr)
+                        }
                     )
                 } else {
                     LoginScreen(vm = authVm)

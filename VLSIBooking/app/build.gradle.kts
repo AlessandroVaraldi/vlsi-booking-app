@@ -15,6 +15,13 @@ android {
         versionCode = 1
         versionName = "1.0"
 
+        // Backend base URL (must end with "/" for Retrofit).
+        buildConfigField(
+            "String",
+            "BACKEND_BASE_URL",
+            "\"https://vlsi-booking-app.onrender.com/\""
+        )
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -29,6 +36,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     composeOptions {

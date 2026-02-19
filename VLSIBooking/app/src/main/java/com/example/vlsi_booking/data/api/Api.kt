@@ -3,6 +3,7 @@ package com.example.vlsi_booking.data.api
 import com.example.vlsi_booking.data.model.DeskStatus
 import com.example.vlsi_booking.data.model.BookingCreate
 import com.example.vlsi_booking.data.model.BookingOut
+import com.example.vlsi_booking.data.model.ChangePasswordRequest
 import com.example.vlsi_booking.data.model.LoginRequest
 import com.example.vlsi_booking.data.model.LoginResponse
 import retrofit2.http.Body
@@ -22,6 +23,9 @@ interface Api {
 
     @POST("auth/signup")
     suspend fun signup(@Body req: LoginRequest): LoginResponse
+
+    @POST("auth/change-password")
+    suspend fun changePassword(@Body req: ChangePasswordRequest): LoginResponse
 
     @POST("bookings")
     suspend fun createBooking(@Body req: BookingCreate): List<BookingOut>
