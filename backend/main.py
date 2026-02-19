@@ -27,6 +27,25 @@ from sqlmodel import SQLModel, Field as SQLField, Session, create_engine, select
 # ----------------------------
 # Config
 # ----------------------------
+def _int_env(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        v = int(raw)
+    except ValueError:
+        return default
+    return v
+
+
+# Token TTL for the mobile app (days)
+TOKEN_TTL_DAYS = _int_env("TOKEN_TTL_DAYS", 30)
+
+# Data retention (days)
+BOOKINGS_RETENTION_DAYS = _int_env("BOOKINGS_RETENTION_DAYS", 180)
+INACTIVE_USER_DAYS = _int_env("INACTIVE_USER_DAYS", 365)
+
+
 def get_database_url() -> str:
     """Resolve DB URL from env, with a local SQLite default."""
 
@@ -255,6 +274,7 @@ class ChangePasswordRequest(BaseModel):
 async def lifespan(app: FastAPI):
     SQLModel.metadata.create_all(engine)
     seed_if_empty()
+    cleanup_old_data()
     yield
 
 
@@ -337,11 +357,78 @@ def require_user(credentials: HTTPAuthorizationCredentials = Depends(bearer)) ->
         row = session.get(AuthToken, token)
         if not row:
             raise HTTPException(status_code=401, detail="Invalid token")
-        if row.expires_at < datetime.utcnow():
+        now = datetime.utcnow()
+
+        # Enforce global max TTL even for older tokens.
+        max_expires_at = row.created_at + timedelta(days=TOKEN_TTL_DAYS)
+        effective_expires_at = row.expires_at if row.expires_at <= max_expires_at else max_expires_at
+
+        if effective_expires_at < now:
             session.delete(row)
             session.commit()
             raise HTTPException(status_code=401, detail="Token expired")
         return row.username
+
+
+def cleanup_old_data() -> None:
+    """Best-effort cleanup for retention (runs at startup)."""
+
+    today = date.today()
+    bookings_cutoff = today - timedelta(days=BOOKINGS_RETENTION_DAYS)
+    inactive_cutoff = datetime.utcnow() - timedelta(days=INACTIVE_USER_DAYS)
+    now = datetime.utcnow()
+
+    with Session(engine) as session:
+        # 1) Remove expired tokens
+        expired = session.exec(select(AuthToken).where(AuthToken.expires_at < now)).all()
+        for t in expired:
+            session.delete(t)
+
+        # 2) Remove old bookings
+        old_bookings = session.exec(select(Booking).where(Booking.day < bookings_cutoff)).all()
+        for b in old_bookings:
+            session.delete(b)
+
+        # 3) Remove inactive users (DB-backed users only)
+        # Criteria:
+        # - user.created_at < inactive_cutoff
+        # - no tokens created after cutoff
+        # - no bookings by username after cutoff date
+        users = session.exec(select(User)).all()
+        for u in users:
+            if u.created_at >= inactive_cutoff:
+                continue
+
+            recent_token = session.exec(
+                select(AuthToken)
+                .where(AuthToken.username == u.username, AuthToken.created_at >= inactive_cutoff)
+                .limit(1)
+            ).first()
+            if recent_token:
+                continue
+
+            # Bookings store a free string; we assume app uses username as booked_by.
+            recent_booking = session.exec(
+                select(Booking)
+                .where(Booking.booked_by == u.username, Booking.day >= inactive_cutoff.date())
+                .limit(1)
+            ).first()
+            if recent_booking:
+                continue
+
+            # Delete user tokens
+            user_tokens = session.exec(select(AuthToken).where(AuthToken.username == u.username)).all()
+            for t in user_tokens:
+                session.delete(t)
+
+            # Delete all bookings for this username
+            user_bookings = session.exec(select(Booking).where(Booking.booked_by == u.username)).all()
+            for b in user_bookings:
+                session.delete(b)
+
+            session.delete(u)
+
+        session.commit()
 
 
 @app.post("/auth/login", response_model=LoginResponse)
@@ -364,7 +451,7 @@ def auth_login(req: LoginRequest):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     now = datetime.utcnow()
-    expires_at = now + timedelta(days=180)
+    expires_at = now + timedelta(days=TOKEN_TTL_DAYS)
     token = secrets.token_urlsafe(32)
 
     with Session(engine) as session:
@@ -390,7 +477,7 @@ def auth_signup(req: LoginRequest):
 
         session.add(User(username=username, password_salt_hex=salt_hex, password_hash_hex=hash_hex, created_at=now))
 
-        expires_at = now + timedelta(days=180)
+        expires_at = now + timedelta(days=TOKEN_TTL_DAYS)
         token = secrets.token_urlsafe(32)
         session.add(AuthToken(token=token, username=username, created_at=now, expires_at=expires_at))
 
@@ -442,7 +529,7 @@ def auth_change_password(req: ChangePasswordRequest, username: str = Depends(req
             session.delete(t)
 
         now = datetime.utcnow()
-        expires_at = now + timedelta(days=180)
+        expires_at = now + timedelta(days=TOKEN_TTL_DAYS)
         token = secrets.token_urlsafe(32)
         session.add(AuthToken(token=token, username=username, created_at=now, expires_at=expires_at))
         session.add(user)
