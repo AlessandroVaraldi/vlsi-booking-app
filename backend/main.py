@@ -32,9 +32,14 @@ def get_database_url() -> str:
 
     url = os.getenv("DATABASE_URL") or os.getenv("DB_URL") or "sqlite:///./lab_desks.db"
 
-    # Some providers historically used postgres:// which SQLAlchemy may not accept.
+    # Some providers historically used postgres://.
+    # Also, SQLAlchemy defaults to psycopg2 for postgresql:// URLs, but this project
+    # ships with psycopg (v3). Force the driver explicitly.
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql://", 1)
+
+    if url.startswith("postgresql://") and not url.startswith("postgresql+"):
+        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
 
     return url
 
