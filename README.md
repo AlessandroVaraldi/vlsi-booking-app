@@ -1,19 +1,19 @@
 # VLSI Booking App
 
-App di prenotazione scrivanie per laboratorio (backend FastAPI + app Android).
+Desk booking app for a lab (FastAPI backend + Android app).
 
-## Struttura
-- `backend/` → API + pagina admin + DB (SQLite in locale, Postgres in produzione)
-- `VLSIBooking/` → app Android (Jetpack Compose)
+## Structure
+- `backend/` → API + admin page + DB (SQLite locally, Postgres in production)
+- `VLSIBooking/` → Android app (Jetpack Compose)
 
-## Funzionalità principali
-- Griglia scrivanie 4×6 con `desk_type`: `staff`, `tesisti`, `bloccata`
-- Prenotazioni AM/PM per scrivanie `tesisti`
-- Scrivanie `staff` con `holder_name` e gestione assenze (coverage) con “temporary occupant”
-- Area admin web protetta da HTTP Basic
+## Main features
+- 4×6 desk grid with `desk_type`: `staff`, `tesisti`, `bloccata`
+- AM/PM bookings for `tesisti` desks
+- `staff` desks with `holder_name` and absence coverage via a “temporary occupant”
+- Web admin area protected by HTTP Basic
 
-## Avvio backend (locale)
-Da root progetto:
+## Run backend (local)
+From the project root:
 
 ```bash
 cd backend
@@ -23,24 +23,24 @@ pip install -r requirements.txt
 uvicorn main:app --reload --port 8000
 ```
 
-Endpoint utili:
+Useful endpoints:
 - `GET /health`
 - `GET /desks?day=YYYY-MM-DD`
 - Swagger: `GET /docs`
 - Admin: `GET /admin/desks?day=YYYY-MM-DD`
 
-### Variabili d’ambiente (backend)
-- `DATABASE_URL` (default: SQLite locale)
-- `LAB_ADMIN_USER`, `LAB_ADMIN_PASS` (credenziali admin)
-- `LAB_USERS` (fallback utenti, formato `alice:pass,bob:pass2`)
-- `TOKEN_TTL_DAYS`, `BOOKINGS_RETENTION_DAYS`, `INACTIVE_USER_DAYS` (opzionali)
+### Environment variables (backend)
+- `DATABASE_URL` (default: local SQLite)
+- `LAB_ADMIN_USER`, `LAB_ADMIN_PASS` (admin credentials)
+- `LAB_USERS` (fallback users, format `alice:pass,bob:pass2`)
+- `TOKEN_TTL_DAYS`, `BOOKINGS_RETENTION_DAYS`, `INACTIVE_USER_DAYS` (optional)
 
-## App Android
-Apri la cartella `VLSIBooking/` in Android Studio.
+## Android app
+Open the `VLSIBooking/` folder in Android Studio.
 
-Il backend usato dall’app è configurato in `VLSIBooking/app/build.gradle.kts` tramite `BACKEND_BASE_URL` (deve terminare con `/` per Retrofit).
+The backend used by the app is configured in `VLSIBooking/app/build.gradle.kts` via `BACKEND_BASE_URL` (it must end with `/` for Retrofit).
 
-## Licenza
-Questo progetto è rilasciato sotto **GNU AGPL v3** (vedi file `LICENSE`).
+## License
+This project is released under the **GNU AGPL v3** (see `LICENSE`).
 
-Nota: AGPL/GPL sono licenze copyleft, ma **non vietano l’uso commerciale**; impongono obblighi di redistribuzione del sorgente quando si distribuisce (e nel caso AGPL anche quando si offre il servizio via rete).
+Note: AGPL/GPL are copyleft licenses, but they **do not forbid commercial use**; they impose source redistribution obligations when you distribute the software (and in the case of AGPL, also when you offer the service over a network).
