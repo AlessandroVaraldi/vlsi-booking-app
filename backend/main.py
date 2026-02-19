@@ -1,14 +1,3 @@
-"""
-main.py — Lab Desk Booking + Admin + Staff Vacation/Temporary Occupant
-
-Features added vs your current version:
-- Staff desks can have a holder_name
-- You can define vacation/coverage periods where the holder is away and a temporary occupant is assigned
-- /desks now returns current_occupant for the requested day (holder or temporary occupant)
-- Admin authentication (HTTP Basic) protects admin pages + admin endpoints
-- Automatic deletion of ALL bookings for a desk when it stops being a "tesisti" desk
-"""
-
 from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import Optional, List, Dict, Tuple
