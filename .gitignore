@@ -1,1 +1,38 @@
-*pycache*
+### Python (local/generated)
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+### Virtual environments (local)
+.venv/
+venv/
+env/
+
+### Environment / secrets (DO NOT COMMIT)
+.env
+.env.*
+*.env
+
+### Local databases (may contain real data)
+*.db
+*.sqlite
+*.sqlite3
+
+### Keys / certificates / signing materials (DO NOT COMMIT)
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.jks
+**/*.keystore
+**/key.properties
+**/keystore.properties
+
+### Android Studio / Gradle local config
+**/local.properties
+
+### IDE settings (often machine-specific)
+.idea/
+.vscode/

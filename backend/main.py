@@ -27,8 +27,24 @@ from sqlmodel import SQLModel, Field as SQLField, Session, create_engine, select
 # ----------------------------
 # Config
 # ----------------------------
-DB_URL = "sqlite:///./lab_desks.db"
-engine = create_engine(DB_URL, echo=False)
+def get_database_url() -> str:
+    """Resolve DB URL from env, with a local SQLite default."""
+
+    url = os.getenv("DATABASE_URL") or os.getenv("DB_URL") or "sqlite:///./lab_desks.db"
+
+    # Some providers historically used postgres:// which SQLAlchemy may not accept.
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+
+    return url
+
+
+DB_URL = get_database_url()
+
+if DB_URL.startswith("sqlite:"):
+    engine = create_engine(DB_URL, echo=False, connect_args={"check_same_thread": False})
+else:
+    engine = create_engine(DB_URL, echo=False, pool_pre_ping=True)
 
 # Admin credentials (set via env in production!)
 # Example:
