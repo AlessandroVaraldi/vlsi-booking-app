@@ -39,6 +39,9 @@ Data deletion endpoints:
 - Self-service: `POST /auth/delete-account` (requires Bearer token + password)
 - Admin: `DELETE /admin/users/{username}` (HTTP Basic)
 
+Data export endpoint:
+- Self-service: `GET /auth/export` (requires Bearer token)
+
 ## Android app
 Open the `VLSIBooking/` folder in Android Studio.
 

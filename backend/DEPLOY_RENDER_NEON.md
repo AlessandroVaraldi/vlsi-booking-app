@@ -46,6 +46,7 @@ Optional (security/retention tuning):
 ## GDPR / data deletion endpoints
 
 - Self-service (Bearer token + password): `POST /auth/delete-account`
+- Self-service export (Bearer token): `GET /auth/export`
 - Admin (HTTP Basic): `DELETE /admin/users/{username}`
 
 ## 5) Deploy and verify

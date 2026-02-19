@@ -486,6 +486,54 @@ def delete_user_data(session: Session, username: str) -> dict:
     }
 
 
+def export_user_data(session: Session, username: str) -> dict:
+    """Export user-linked personal data for DSAR (no secrets)."""
+
+    user = session.get(User, username)
+    bookings = session.exec(
+        select(Booking)
+        .where(Booking.booked_by == username)
+        .order_by(Booking.day, Booking.slot, Booking.desk_id)
+    ).all()
+    tokens = session.exec(
+        select(AuthToken)
+        .where(AuthToken.username == username)
+        .order_by(AuthToken.created_at.desc())
+    ).all()
+
+    return {
+        "username": username,
+        "exported_at": datetime.utcnow().isoformat() + "Z",
+        "retention": {
+            "token_ttl_days": TOKEN_TTL_DAYS,
+            "bookings_retention_days": BOOKINGS_RETENTION_DAYS,
+            "inactive_user_days": INACTIVE_USER_DAYS,
+        },
+        "user": {
+            "exists_in_db": user is not None,
+            "created_at": (user.created_at.isoformat() + "Z") if user else None,
+        },
+        "bookings": [
+            {
+                "id": b.id,
+                "desk_id": b.desk_id,
+                "day": b.day.isoformat(),
+                "slot": b.slot,
+                "booked_by": b.booked_by,
+            }
+            for b in bookings
+        ],
+        # Token strings are secrets; export only metadata.
+        "auth_tokens": [
+            {
+                "created_at": t.created_at.isoformat() + "Z",
+                "expires_at": t.expires_at.isoformat() + "Z",
+            }
+            for t in tokens
+        ],
+    }
+
+
 @app.post("/auth/login", response_model=LoginResponse)
 def auth_login(req: LoginRequest):
     username = normalize_name(req.username, "username")
@@ -613,6 +661,13 @@ def auth_delete_account(req: DeleteAccountRequest, username: str = Depends(requi
         deleted = delete_user_data(session, username)
         session.commit()
         return {"ok": True, **deleted}
+
+
+@app.get("/auth/export")
+def auth_export(username: str = Depends(require_user)):
+    """Self-service export of personal data linked to the authenticated user."""
+    with Session(engine) as session:
+        return export_user_data(session, username)
 
 
 def find_active_coverage(
