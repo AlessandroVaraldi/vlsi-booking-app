@@ -42,5 +42,3 @@ The backend used by the app is configured in `VLSIBooking/app/build.gradle.kts` 
 
 ## License
 This project is released under the **GNU AGPL v3** (see `LICENSE`).
-
-Note: AGPL/GPL are copyleft licenses, but they **do not forbid commercial use**; they impose source redistribution obligations when you distribute the software (and in the case of AGPL, also when you offer the service over a network).
