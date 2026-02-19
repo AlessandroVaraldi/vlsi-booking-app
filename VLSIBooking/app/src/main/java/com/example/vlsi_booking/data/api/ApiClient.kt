@@ -13,7 +13,11 @@ object ApiClient {
 
     private val client: OkHttpClient by lazy {
         val logging = HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BODY
+            level = if (BuildConfig.DEBUG) {
+                HttpLoggingInterceptor.Level.BODY
+            } else {
+                HttpLoggingInterceptor.Level.NONE
+            }
             redactHeader("Authorization")
         }
         OkHttpClient.Builder()

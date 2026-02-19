@@ -41,6 +41,12 @@ Optional (security/retention tuning):
 - `TOKEN_TTL_DAYS` = `30` (default 30)
 - `BOOKINGS_RETENTION_DAYS` = `180` (default 180)
 - `INACTIVE_USER_DAYS` = `365` (default 365)
+- `CLEANUP_INTERVAL_HOURS` = `24` (default 24) → runs cleanup periodically (not only at startup)
+
+## GDPR / data deletion endpoints
+
+- Self-service (Bearer token + password): `POST /auth/delete-account`
+- Admin (HTTP Basic): `DELETE /admin/users/{username}`
 
 ## 5) Deploy and verify
 

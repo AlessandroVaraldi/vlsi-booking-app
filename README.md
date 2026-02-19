@@ -33,7 +33,11 @@ Useful endpoints:
 - `DATABASE_URL` (default: local SQLite)
 - `LAB_ADMIN_USER`, `LAB_ADMIN_PASS` (admin credentials)
 - `LAB_USERS` (fallback users, format `alice:pass,bob:pass2`)
-- `TOKEN_TTL_DAYS`, `BOOKINGS_RETENTION_DAYS`, `INACTIVE_USER_DAYS` (optional)
+- `TOKEN_TTL_DAYS`, `BOOKINGS_RETENTION_DAYS`, `INACTIVE_USER_DAYS`, `CLEANUP_INTERVAL_HOURS` (optional)
+
+Data deletion endpoints:
+- Self-service: `POST /auth/delete-account` (requires Bearer token + password)
+- Admin: `DELETE /admin/users/{username}` (HTTP Basic)
 
 ## Android app
 Open the `VLSIBooking/` folder in Android Studio.

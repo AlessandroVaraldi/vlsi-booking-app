@@ -44,9 +44,11 @@ fun BookingDialog(
 
                 OutlinedTextField(
                     value = name,
-                    onValueChange = { name = it },
-                    label = { Text("Your name") },
-                    singleLine = true
+                    onValueChange = { },
+                    label = { Text("Username") },
+                    singleLine = true,
+                    readOnly = true,
+                    enabled = false
                 )
 
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {

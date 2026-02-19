@@ -13,6 +13,7 @@ from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import Optional, List, Dict, Tuple
 from contextlib import asynccontextmanager
+import asyncio
 import os
 import secrets
 import hashlib
@@ -44,6 +45,9 @@ TOKEN_TTL_DAYS = _int_env("TOKEN_TTL_DAYS", 30)
 # Data retention (days)
 BOOKINGS_RETENTION_DAYS = _int_env("BOOKINGS_RETENTION_DAYS", 180)
 INACTIVE_USER_DAYS = _int_env("INACTIVE_USER_DAYS", 365)
+
+# How often to run the retention cleanup loop (hours)
+CLEANUP_INTERVAL_HOURS = _int_env("CLEANUP_INTERVAL_HOURS", 24)
 
 
 def get_database_url() -> str:
@@ -267,6 +271,10 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(min_length=1, max_length=200)
 
 
+class DeleteAccountRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=200)
+
+
 # ----------------------------
 # App lifecycle
 # ----------------------------
@@ -275,7 +283,25 @@ async def lifespan(app: FastAPI):
     SQLModel.metadata.create_all(engine)
     seed_if_empty()
     cleanup_old_data()
+
+    async def _periodic_cleanup() -> None:
+        # Best-effort loop: never crash the app due to cleanup.
+        interval = max(1, CLEANUP_INTERVAL_HOURS) * 3600
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                cleanup_old_data()
+            except Exception:
+                # Avoid leaking PII into logs; keep it silent.
+                pass
+
+    task = asyncio.create_task(_periodic_cleanup())
     yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(title="Lab Desk Booking + Admin + Coverage", lifespan=lifespan)
@@ -431,6 +457,35 @@ def cleanup_old_data() -> None:
         session.commit()
 
 
+def delete_user_data(session: Session, username: str) -> dict:
+    """Delete user-linked data (tokens, bookings, user record) for a username."""
+
+    deleted_tokens = 0
+    deleted_bookings = 0
+    deleted_user = False
+
+    tokens = session.exec(select(AuthToken).where(AuthToken.username == username)).all()
+    for t in tokens:
+        session.delete(t)
+        deleted_tokens += 1
+
+    bookings = session.exec(select(Booking).where(Booking.booked_by == username)).all()
+    for b in bookings:
+        session.delete(b)
+        deleted_bookings += 1
+
+    user = session.get(User, username)
+    if user:
+        session.delete(user)
+        deleted_user = True
+
+    return {
+        "deleted_tokens": deleted_tokens,
+        "deleted_bookings": deleted_bookings,
+        "deleted_user": deleted_user,
+    }
+
+
 @app.post("/auth/login", response_model=LoginResponse)
 def auth_login(req: LoginRequest):
     username = normalize_name(req.username, "username")
@@ -538,6 +593,28 @@ def auth_change_password(req: ChangePasswordRequest, username: str = Depends(req
     return LoginResponse(token=token, username=username, expires_at=expires_at)
 
 
+@app.post("/auth/delete-account")
+def auth_delete_account(req: DeleteAccountRequest, username: str = Depends(require_user)):
+    """Self-service deletion: deletes tokens, bookings and (if present) the DB user."""
+
+    password = req.password
+
+    # Verify password against DB user if present; otherwise fallback to env users.
+    with Session(engine) as session:
+        user = session.get(User, username)
+        if user:
+            if not verify_password(password, user.password_salt_hex, user.password_hash_hex):
+                raise HTTPException(status_code=401, detail="Invalid password")
+        else:
+            expected = APP_USERS.get(username)
+            if expected is None or not secrets.compare_digest(password, expected):
+                raise HTTPException(status_code=401, detail="Invalid password")
+
+        deleted = delete_user_data(session, username)
+        session.commit()
+        return {"ok": True, **deleted}
+
+
 def find_active_coverage(
     session: Session, desk_id: int, day: date
 ) -> Optional[StaffCoverage]:
@@ -579,10 +656,10 @@ def delete_all_bookings_for_desk(session: Session, desk_id: int) -> int:
 
 
 # ----------------------------
-# Public endpoints (no auth)
+# User endpoints (Bearer token)
 # ----------------------------
 @app.get("/desks", response_model=List[DeskStatusOut])
-def get_desks(day: date = Query(..., description="YYYY-MM-DD")):
+def get_desks(day: date = Query(..., description="YYYY-MM-DD"), username: str = Depends(require_user)):
     """
     Returns all desks with:
     - For THESIS desks: AM/PM bookings for the requested day
@@ -625,21 +702,24 @@ def get_desks(day: date = Query(..., description="YYYY-MM-DD")):
 
             out.append(status)
 
+        _ = username  # auth guard; not used otherwise
         return out
 
 
 @app.get("/bookings", response_model=List[BookingOut])
-def list_bookings(day: date = Query(...)):
+def list_bookings(day: date = Query(...), username: str = Depends(require_user)):
     with Session(engine) as session:
         rows = session.exec(
             select(Booking).where(Booking.day == day).order_by(Booking.slot, Booking.desk_id)
         ).all()
+        _ = username  # auth guard; not used otherwise
         return [BookingOut(id=b.id, desk_id=b.desk_id, day=b.day, slot=b.slot, booked_by=b.booked_by) for b in rows]
 
 
 @app.post("/bookings", response_model=List[BookingOut])
 def create_booking(req: BookingCreate, username: str = Depends(require_user)):
-    booked_by = normalize_name(req.booked_by, "booked_by")
+    # Tie bookings to the authenticated user to prevent spoofing.
+    booked_by = username
 
     if not req.am and not req.pm:
         raise HTTPException(status_code=400, detail="Select at least AM or PM.")
@@ -693,16 +773,18 @@ def create_booking(req: BookingCreate, username: str = Depends(require_user)):
 @app.delete("/bookings/{booking_id}")
 def delete_booking(booking_id: int, req: CancelRequest, username: str = Depends(require_user)):
     """
-    Deletes a booking if booked_by matches (lightweight authorization without auth).
+    Deletes a booking owned by the authenticated user.
     """
-    booked_by = normalize_name(req.booked_by, "booked_by")
+    # Keep request shape for backward compatibility, but enforce auth-bound ownership.
+    if (req.booked_by or "").strip() and req.booked_by.strip() != username:
+        raise HTTPException(status_code=403, detail="Name does not match authenticated user")
 
     with Session(engine) as session:
         b = session.get(Booking, booking_id)
         if not b:
             raise HTTPException(status_code=404, detail="Booking not found.")
-        if b.booked_by != booked_by:
-            raise HTTPException(status_code=403, detail="Name not allowed to delete this booking.")
+        if b.booked_by != username:
+            raise HTTPException(status_code=403, detail="Not allowed to delete this booking.")
 
         session.delete(b)
         session.commit()
@@ -712,6 +794,17 @@ def delete_booking(booking_id: int, req: CancelRequest, username: str = Depends(
 # ----------------------------
 # Admin API endpoints (Basic Auth)
 # ----------------------------
+@app.delete("/admin/users/{username}", dependencies=[Depends(require_admin)])
+def admin_delete_user(username: str):
+    """Admin deletion: deletes tokens, bookings and DB user record for a username."""
+
+    u = normalize_name(username, "username")
+    with Session(engine) as session:
+        deleted = delete_user_data(session, u)
+        session.commit()
+        return {"ok": True, **deleted}
+
+
 @app.patch("/desks/{desk_id}", response_model=DeskStatusOut, dependencies=[Depends(require_admin)])
 def update_desk(desk_id: int, req: DeskUpdate, day: date = Query(..., description="YYYY-MM-DD")):
     """
