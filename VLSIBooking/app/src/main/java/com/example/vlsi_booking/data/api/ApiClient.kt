@@ -5,6 +5,7 @@ import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
+import java.util.concurrent.TimeUnit
 
 object ApiClient {
     // Configured in Gradle as BuildConfig.BACKEND_BASE_URL.
@@ -21,6 +22,11 @@ object ApiClient {
             redactHeader("Authorization")
         }
         OkHttpClient.Builder()
+            // Render free tier can take up to ~1 minute to wake up from sleep.
+            .callTimeout(70, TimeUnit.SECONDS)
+            .connectTimeout(70, TimeUnit.SECONDS)
+            .readTimeout(70, TimeUnit.SECONDS)
+            .writeTimeout(70, TimeUnit.SECONDS)
             .addInterceptor { chain ->
                 val original = chain.request()
                 val token = AuthTokenHolder.token

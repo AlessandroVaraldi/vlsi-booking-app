@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import com.example.vlsi_booking.data.model.DeskStatus
 import com.example.vlsi_booking.ui.MainViewModel
 import com.example.vlsi_booking.ui.components.BookingDialog
+import com.example.vlsi_booking.ui.components.FakePercentProgressBar
 import java.time.LocalDate
 import kotlinx.coroutines.delay
 import kotlin.math.abs
@@ -94,10 +95,12 @@ fun MainScreen(
             HeaderRow(date = state.selectedDate, onPickDate = vm::setDate, enabled = !isBreakoutActive)
             Spacer(Modifier.height(12.dp))
 
-            if (state.isLoading) {
-                LinearProgressIndicator(Modifier.fillMaxWidth())
-                Spacer(Modifier.height(12.dp))
-            }
+            FakePercentProgressBar(
+                active = state.isLoading,
+                modifier = Modifier.fillMaxWidth(),
+                bottomSpacing = 12.dp,
+                showDelayMs = 2_000L
+            )
 
             state.errorMessage?.let { msg ->
                 ErrorCard(message = msg, onDismiss = vm::clearError)
@@ -301,8 +304,14 @@ fun MainScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("Data: ${state.selectedDate}")
+                    FakePercentProgressBar(
+                        active = state.isMyBookingsLoading,
+                        modifier = Modifier.fillMaxWidth(),
+                        showDelayMs = 2_000L
+                    )
+
                     if (state.isMyBookingsLoading) {
-                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                        // Keep dialog content compact while loading.
                     } else if (state.myBookings.isEmpty()) {
                         Text("Nessuna prenotazione")
                     } else {
@@ -382,9 +391,11 @@ private fun ChangePasswordDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                if (isSubmitting) {
-                    LinearProgressIndicator(Modifier.fillMaxWidth())
-                }
+                FakePercentProgressBar(
+                    active = isSubmitting,
+                    modifier = Modifier.fillMaxWidth(),
+                    showDelayMs = 2_000L
+                )
 
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
